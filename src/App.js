@@ -307,12 +307,21 @@ function extractSum(data) {
 function useKakaoSDK() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (window.kakao?.maps) { setReady(true); return; }
-    if (document.getElementById("kko-sdk")) return;
+    if (window.kakao?.maps?.Map) { setReady(true); return; }
+
+    const poll = () => {
+      const iv = setInterval(() => {
+        if (window.kakao?.maps?.Map) { clearInterval(iv); setReady(true); }
+      }, 100);
+    };
+
+    if (document.getElementById("kko-sdk")) { poll(); return; }
+
     const s = document.createElement("script");
-    s.id="kko-sdk";
-    s.src=`//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_JS_KEY}&libraries=services&autoload=false`;
-    s.onload = () => window.kakao.maps.load(() => setReady(true));
+    s.id  = "kko-sdk";
+    s.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_JS_KEY}&libraries=services`;
+    s.onload = poll;
+    s.onerror = () => console.error("Kakao SDK load failed");
     document.head.appendChild(s);
   }, []);
   return ready;
@@ -369,8 +378,7 @@ function KakaoMap({ center, zoom=5, routes=[], markers=[], height=220 }) {
     const K = window.kakao.maps;
     const m = new K.Map(ref.current, { center: new K.LatLng(center.lat, center.lng), level: zoom });
     map.current = m;
-    // relayout 한 번 호출해서 컨테이너 크기 반영
-    setTimeout(() => m.relayout(), 0);
+    setTimeout(() => { m.relayout(); }, 100);
     return () => { map.current = null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
