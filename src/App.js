@@ -132,9 +132,6 @@ const styles = `
   .err-banner { background: #FFF3F3; border: 1px solid #FFCDD2; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #C62828; }
   .route-summary-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #F5F3EE; border-radius: 12px; margin-bottom: 12px; }
   .setting-status { border: 1px solid #E0DED8; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
-  /* leaflet 기본 스타일 덮어쓰기 */
-  .leaflet-container { font-family: 'DM Sans', sans-serif !important; }
-  .leaflet-control-attribution { display: none !important; }
 `;
 
 // ─── Mock fallback ───
@@ -176,22 +173,6 @@ function extractSum(data) {
   return { dur:Math.round((s.duration||0)/60), dist:((s.distance||0)/1000).toFixed(1), fare:s.fare?.taxi||10800 };
 }
 
-// ─── Leaflet 로더 (CDN, API키 불필요) ───
-function useLeaflet() {
-  const [ready, setReady] = useState(!!window.L);
-  useEffect(() => {
-    if (window.L) { setReady(true); return; }
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(link);
-    const s = document.createElement("script");
-    s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    s.onload = () => setReady(true);
-    document.head.appendChild(s);
-  }, []);
-  return ready;
-}
 
 // ─── 장소 검색 (서버 프록시) ───
 function usePlaces() {
@@ -236,77 +217,46 @@ async function buildRoutes(origin, dest) {
   ];
 }
 
-// ─── LeafletMap 컴포넌트 ───
-function LeafletMap({ center, zoom=14, routes=[], markers=[], height=220 }) {
-  const ref = useRef(null);
-  const map = useRef(null);
-  const layers = useRef([]);
-
-  useEffect(() => {
-    if (!ref.current || !window.L) return;
-    const L = window.L;
-    // 이미 초기화된 경우 제거
-    if (map.current) { map.current.remove(); map.current = null; }
-
-    const m = L.map(ref.current, {
-      center: [center.lat, center.lng],
-      zoom,
-      zoomControl: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      attributionControl: false,
-    });
-    // CartoDB Positron — 깔끔한 밝은 지도
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd", maxZoom: 19,
-    }).addTo(m);
-    map.current = m;
-    return () => { if (map.current) { map.current.remove(); map.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!map.current) return;
-    map.current.setView([center.lat, center.lng], map.current.getZoom());
-  }, [center.lat, center.lng]);
-
-  useEffect(() => {
-    if (!map.current || !window.L) return;
-    const L = window.L;
-    layers.current.forEach(l => l.remove());
-    layers.current = [];
-
-    routes.forEach(r => {
-      if (!r.points?.length) return;
-      const poly = L.polyline(r.points.map(p=>[p.y,p.x]), {
-        color: r.active ? "#0A0A0A" : "#BFBDB4",
-        weight: r.active ? 6 : 2,
-        opacity: r.active ? 1 : 0.45,
-      }).addTo(map.current);
-      layers.current.push(poly);
-    });
-
-    markers.forEach((m, i) => {
-      const dot = i===0
-        ? `<div style="width:12px;height:12px;background:#0A0A0A;border-radius:50%;margin-top:-6px;margin-left:-6px;"></div>`
-        : `<div style="width:12px;height:12px;background:#fff;border:2.5px solid #0A0A0A;border-radius:50%;box-sizing:border-box;margin-top:-6px;margin-left:-6px;"></div>`;
-      const icon = L.divIcon({ className:"", html: dot, iconSize:[0,0] });
-      layers.current.push(L.marker([m.lat,m.lng],{icon}).addTo(map.current));
-    });
-
-    const allPts = routes.flatMap(r=>r.points||[]);
-    if (allPts.length > 1) {
-      const b = L.latLngBounds(allPts.map(p=>[p.y,p.x]));
-      map.current.fitBounds(b, { padding:[30,30] });
-    } else if (markers.length > 0) {
-      const b = L.latLngBounds(markers.map(m=>[m.lat,m.lng]));
-      map.current.fitBounds(b.pad(0.5));
-    }
-  }, [routes, markers]);
-
-  return <div ref={ref} style={{ width:"100%", height }} />;
+// ─── KakaoStaticMap 컴포넌트 ───
+function KakaoStaticMap({ center, routes=[], markers=[], height=220 }) {
+  function ds(pts, max) {
+    if (!pts?.length) return [];
+    if (pts.length <= max) return pts;
+    const step = (pts.length - 1) / (max - 1);
+    return Array.from({length: max}, (_, i) => pts[Math.round(i * step)]);
+  }
+  function calcLevel(allPts) {
+    if (!allPts.length) return 6;
+    const lats = allPts.map(p => p.y), lngs = allPts.map(p => p.x);
+    const span = Math.max(Math.max(...lats)-Math.min(...lats), Math.max(...lngs)-Math.min(...lngs));
+    if (span > 0.3) return 9; if (span > 0.1) return 8; if (span > 0.05) return 7;
+    if (span > 0.02) return 6; if (span > 0.01) return 5; return 4;
+  }
+  const allPts = routes.flatMap(r => r.points||[]);
+  const level = allPts.length > 1 ? calcLevel(allPts) : 6;
+  let mc = center;
+  if (allPts.length > 1) {
+    const lats=allPts.map(p=>p.y), lngs=allPts.map(p=>p.x);
+    mc = { lat:(Math.max(...lats)+Math.min(...lats))/2, lng:(Math.max(...lngs)+Math.min(...lngs))/2 };
+  }
+  const params = new URLSearchParams({ center:`${mc.lng},${mc.lat}`, level, w:390, h:height });
+  routes.filter(r=>!r.active&&r.points?.length).forEach(r=>{
+    const pos=ds(r.points,30).map(p=>`${p.x} ${p.y}`).join(' ');
+    params.append('path',`color(0xBFBDB4)width(2)pos(${pos})`);
+  });
+  const active=routes.find(r=>r.active);
+  if (active?.points?.length) {
+    const pos=ds(active.points,60).map(p=>`${p.x} ${p.y}`).join(' ');
+    params.append('path',`color(0x0A0A0A)width(6)pos(${pos})`);
+  }
+  markers.forEach((m,i)=>params.append('markers',`color(${i===0?'0x0A0A0A':'0xFFFFFF'})size(small)pos(${m.lng} ${m.lat})`));
+  return (
+    <div style={{width:"100%",height,background:"#E8E6E0",overflow:"hidden"}}>
+      <img src={`/api/staticmap?${params.toString()}`} alt="지도" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+    </div>
+  );
 }
+
 
 const msdvColor = s => s<25?"#2E7D32":s<50?"#F57F17":"#C62828";
 const msdvLabel = s => s<25?"매우 편안":s<45?"편안":s<65?"보통":"불편";
@@ -327,7 +277,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState(false);
 
-  const leaflet = useLeaflet();
   const { results, search, clear } = usePlaces();
 
   useEffect(() => {
@@ -386,15 +335,7 @@ export default function App() {
 
           {/* ── STEP 1 ── */}
           {step===1 && <>
-            {leaflet
-              ? <LeafletMap key="map1" center={loc} zoom={14} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
-              : <div className="map-fallback" style={{height:240}}>
-                  <div className="map-grid-h" style={{top:"38%"}}/><div className="map-grid-h" style={{top:"65%"}}/>
-                  <div className="map-grid-v" style={{left:"30%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
-                  <div className="map-dot" style={{top:"50%",left:"50%"}}/>
-                  <div className="map-tag">현재 위치</div>
-                </div>
-            }
+            <KakaoStaticMap center={loc} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
             <div className="pad">
               <div className="input-card">
                 <div className="input-row">
@@ -443,14 +384,7 @@ export default function App() {
                   <div style={{fontSize:11,color:"#B0AEA8",fontFamily:"'DM Mono',monospace"}}>MSDV 지수 계산 중</div>
                 </div>
               : <>
-                  {leaflet && routes && routes[0].points.length>0
-                    ? <LeafletMap key="map2" center={dest||loc} zoom={13} routes={mapRoutes} markers={mapMarkers} height={200}/>
-                    : <div className="map-fallback" style={{height:200}}>
-                        <div className="map-grid-h" style={{top:"40%"}}/><div className="map-grid-v" style={{left:"28%"}}/><div className="map-grid-v" style={{left:"63%"}}/>
-                        <div style={{position:"absolute",height:sliderVal<2?2:4,background:"#0A0A0A",borderRadius:2,top:"calc(42% - 2px)",left:"12%",width:"76%",transition:"all .3s"}}/>
-                        <div className="map-dot" style={{top:"42%",left:"12%"}}/><div className="map-dot-end" style={{top:"42%",left:"88%"}}/>
-                      </div>
-                  }
+                  <KakaoStaticMap center={dest||loc} routes={mapRoutes} markers={mapMarkers} height={200}/>
                   <div className="pad">
                     {err && <div className="err-banner">경로 탐색 실패 — 샘플 데이터로 표시합니다</div>}
                     <div className="slider-card">
@@ -519,19 +453,10 @@ export default function App() {
 
           {/* ── STEP 4 ── */}
           {step===4 && <>
-            {leaflet && dest
-              ? <LeafletMap key="map4" center={dest} zoom={15} markers={[{lat:dest.lat,lng:dest.lng}]} height={220}/>
-              : <div className="map-fallback" style={{height:220}}>
-                  <div className="map-grid-h" style={{top:"40%"}}/><div className="map-grid-h" style={{top:"68%"}}/>
-                  <div className="map-grid-v" style={{left:"28%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
-                  <div style={{position:"absolute",height:2,background:"#0A0A0A",borderRadius:2,opacity:.3,top:"calc(40% - 1px)",left:"10%",width:"80%"}}/>
-                  <div className="map-dot" style={{top:"40%",left:"10%"}}/><div className="map-dot-end" style={{top:"40%",left:"90%"}}/>
-                  <div className="map-car" style={{top:"40%",left:`${carX}%`}}>
-                    <svg width="20" height="20" viewBox="0 0 18 18" fill="none"><rect x="1" y="5" width="16" height="9" rx="3" fill="#0A0A0A"/><rect x="4" y="3" width="10" height="5" rx="2" fill="#0A0A0A" opacity=".6"/><circle cx="4.5" cy="14" r="1.5" fill="#fff" stroke="#0A0A0A" strokeWidth="1"/><circle cx="13.5" cy="14" r="1.5" fill="#fff" stroke="#0A0A0A" strokeWidth="1"/></svg>
-                  </div>
-                  <div className="map-chip"><div className="pulse-dot"/><span>3분 후 도착</span></div>
-                </div>
-            }
+            <div style={{position:"relative"}}>
+              <KakaoStaticMap center={dest||loc} markers={dest?[{lat:loc.lat,lng:loc.lng},{lat:dest.lat,lng:dest.lng}]:[{lat:loc.lat,lng:loc.lng}]} height={220}/>
+              <div className="map-chip" style={{position:"absolute",top:10,right:12}}><div className="pulse-dot"/><span>3분 후 도착</span></div>
+            </div>
             <div className="pad">
               <div className="arrival-card">
                 <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
