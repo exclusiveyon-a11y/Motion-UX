@@ -192,19 +192,20 @@ function calcRouteMSDV(pts, links) {
   return Math.min(95, Math.round(geom + cong*4 + alley*5 + turns*3));
 }
 // TMap GeoJSON에서 링크(도로 구간) 단위로 추출
-// roadType: 0=고속도로, 2=국도, 3=지방도, 5=특별시도, 6=광역시도, 8=이면도로
+// roadType: 0=고속도로, 1=도시고속도로, 2=국도, 3=지방도, 5=특별시도, 6=광역시도, 8=이면도로
 // congestion: 0=원활, 1=서행, 2=정체
 // turnType: 11/184=직진, 12=좌회전, 13=우회전, 14=유턴, 16/17/18/19=사선
 function extractLinks(data) {
   return (data?.features||[])
     .filter(f=>f.geometry?.type==="LineString")
     .map(f=>({
-      distance: f.properties?.distance||0,
-      roadType:  f.properties?.roadType??-1,
-      congestion:f.properties?.congestion??0,
-      turnType:  f.properties?.turnType??11,
-      name:      f.properties?.name||"",
-      coords:    f.geometry.coordinates,
+      distance:    f.properties?.distance||0,
+      roadType:    f.properties?.roadType??-1,
+      congestion:  f.properties?.congestion??0,
+      turnType:    f.properties?.turnType??11,
+      name:        f.properties?.name||"",
+      coords:      f.geometry.coordinates,
+      isExpressway:[0,1].includes(f.properties?.roadType??-1),
     }));
 }
 function extractPts(data) {
