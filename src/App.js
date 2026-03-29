@@ -150,8 +150,9 @@ const SETTINGS = [
 ];
 
 // ─── MSDV ───
+// 폴리라인 기하 기반 커브 점수 (0~60)
 function calcMSDV(pts) {
-  if (!pts || pts.length < 3) return 50;
+  if (!pts || pts.length < 3) return 30;
   let total = 0, sharp = 0, n = 0;
   for (let i = 1; i < pts.length - 1; i++) {
     const p1=pts[i-1], p2=pts[i], p3=pts[i+1];
@@ -161,7 +162,19 @@ function calcMSDV(pts) {
     const a = Math.acos(Math.max(-1,Math.min(1,(dx1*dx2+dy1*dy2)/(l1*l2)))) * 180/Math.PI;
     total+=a; if(a>25) sharp++; n++;
   }
-  return n===0 ? 50 : Math.round(Math.min(100,(total/n)*1.8+(sharp/n)*45));
+  return n===0 ? 30 : Math.min(60, Math.round((total/n)*1.4+(sharp/n)*30));
+}
+
+// 도로 품질 패널티 포함 종합 MSDV (0~100)
+// 정체(최대+30), 이면도로(최대+20), 급회전(최대+15) 추가
+function calcRouteMSDV(pts, links) {
+  const geom = calcMSDV(pts);
+  if (!links?.length) return geom;
+  const n = links.length;
+  const congRatio  = links.filter(l=>l.congestion>=1).length / n;
+  const alleyRatio = links.filter(l=>l.roadType===8).length / n;
+  const turnRatio  = links.filter(l=>SHARP_TURNS.includes(l.turnType)).length / n;
+  return Math.min(100, Math.round(geom + congRatio*30 + alleyRatio*20 + turnRatio*15));
 }
 // TMap GeoJSON에서 링크(도로 구간) 단위로 추출
 // roadType: 0=고속도로, 2=국도, 3=지방도, 5=특별시도, 6=광역시도, 8=이면도로
@@ -245,7 +258,9 @@ async function buildRoutes(origin, dest) {
   const tLinks=extractLinks(td), rLinks=extractLinks(rd);
   const tp=extractPts(td), rp=extractPts(rd);
   const ts=extractSum(td), rs=extractSum(rd);
-  const tm=calcMSDV(tp), rm=calcMSDV(rp);
+  // 종합 MSDV: 기하 커브 + 정체 + 이면도로 + 급회전 패널티 합산
+  const tm=calcRouteMSDV(tp, tLinks);   // Sport (최적경로 — 정체 많음)
+  const rm=calcRouteMSDV(rp, rLinks);   // Natural (편한길 — 정체 적음)
 
   // 실제 도로 데이터 기반 pill 생성
   const { comfortPills, why: comfortWhy, congDiff } = analyzePills(tLinks, rLinks);
@@ -268,8 +283,8 @@ async function buildRoutes(origin, dest) {
   return [
     { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",    time:`${ts.dur}분`,   diff:"기본",          pills:sportPills,   price:f(B),      pdiff:"기본 요금",          preason:"추가 가산 없음",  bar:10, msdv:tm,                   points:tp },
     { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}], price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:rm,                   points:rp },
-    { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.round(rm*0.62),points:rp },
-    { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.round(rm*0.30),points:rp },
+    { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.max(15,Math.round(rm*0.48)),points:rp },
+    { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.max(8, Math.round(rm*0.18)),points:rp },
   ];
 }
 
