@@ -140,16 +140,21 @@ const styles = `
   .loc-btn:active { opacity:.7; }
   @keyframes spin { to{transform:rotate(360deg)} }
   .loc-spin { animation:spin .8s linear infinite; }
+  .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin:8px 0 10px; }
+  .stat-cell { background:#fff; border-radius:8px; padding:8px 4px 6px; text-align:center; border:1px solid rgba(0,0,0,.06); }
+  .stat-num { display:block; font-size:16px; font-weight:700; font-family:'DM Mono',monospace; line-height:1.1; }
+  .stat-lbl { display:block; font-size:9px; color:#888; margin-top:3px; }
+  .stat-delta { display:block; font-size:9px; font-weight:700; margin-top:2px; font-family:'DM Mono',monospace; }
   .route-summary-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #F5F3EE; border-radius: 12px; margin-bottom: 12px; }
   .setting-status { border: 1px solid #E0DED8; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
 `;
 
 // ─── Mock fallback ───
 const MOCK = [
-  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true}],                           price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[] },
-  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"도심 일부",m:true}],                               price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[] },
-  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[] },
-  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"큰길 위주"},{t:"급정거 최소화"}],               price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[] },
+  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true}],                           price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[], stats:{cong:9,alley:4,turns:14,dist:"10.2"} },
+  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"도심 일부",m:true}],                               price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[], stats:{cong:5,alley:2,turns:9, dist:"11.5"} },
+  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[], stats:{cong:2,alley:0,turns:4, dist:"12.1"} },
+  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"큰길 위주"},{t:"급정거 최소화"}],               price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[], stats:{cong:1,alley:0,turns:2, dist:"13.2"} },
 ];
 
 const SETTINGS = [
@@ -281,11 +286,20 @@ async function buildRoutes(origin, dest) {
   const rm = Math.max(rawR, 35);
   const tm = Math.max(rawT, rm + 20, 55);
 
+  // 도로 환경 수치 (정체구간, 이면도로, 급회전)
+  const tCong =tLinks.filter(l=>l.congestion>=1).length;
+  const tAlley=tLinks.filter(l=>l.roadType===8).length;
+  const tTurns=tLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
+  const rCong =rLinks.filter(l=>l.congestion>=1).length;
+  const rAlley=rLinks.filter(l=>l.roadType===8).length;
+  const rTurns=rLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
+  const tStats={cong:tCong,alley:tAlley,turns:tTurns,dist:ts.dist};
+  const rStats={cong:rCong,alley:rAlley,turns:rTurns,dist:rs.dist};
+
   // 실제 도로 데이터 기반 pill 생성
   const { comfortPills, why: comfortWhy, congDiff } = analyzePills(tLinks, rLinks);
 
   // Sport 경로 pill: 실제 정체 구간 수 반영
-  const tCong=tLinks.filter(l=>l.congestion>=1).length;
   const sportPills=[{t:`${ts.dist}km`}, tCong>0?{t:`정체 ${tCong}구간`,m:true}:{t:"급정거 多",m:true}];
 
   // Anti-nausea pill: comfort 대비 추가 감소 수치
@@ -300,10 +314,10 @@ async function buildRoutes(origin, dest) {
   const dm=m=>m<=0?"기본":`+${m}분`;
 
   return [
-    { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",    time:`${ts.dur}분`,   diff:"기본",          pills:sportPills,   price:f(B),      pdiff:"기본 요금",          preason:"추가 가산 없음",  bar:10, msdv:tm,                   points:tp },
-    { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}], price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:rm,                   points:rp },
-    { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.max(15,Math.round(rm*0.48)),points:rp },
-    { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.max(8, Math.round(rm*0.18)),points:rp },
+    { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",    time:`${ts.dur}분`,   diff:"기본",          pills:sportPills,   price:f(B),      pdiff:"기본 요금",          preason:"추가 가산 없음",  bar:10, msdv:tm,                                    points:tp, stats:tStats },
+    { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}], price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:rm,                                    points:rp, stats:rStats },
+    { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.max(15,Math.round(rm*0.48)),             points:rp, stats:rStats },
+    { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.max(8, Math.round(rm*0.18)), points:rp, stats:rStats },
   ];
 }
 
@@ -564,6 +578,32 @@ export default function App() {
                         </div>
                       </div>
                       <div className="pills">{rd.pills.map(p=><span key={p.t} className={p.m?"pill-muted":"pill"} style={p.m?{}:{borderColor:TIER_CFG[sliderVal].color,color:TIER_CFG[sliderVal].color}}>{p.t}</span>)}</div>
+                      {rd.stats && (()=>{
+                        const s0=list[0].stats;
+                        const tc=TIER_CFG[sliderVal].color;
+                        const delta=(cur,base,lowerIsBetter=true)=>{
+                          const d=base-cur;
+                          if(d===0) return null;
+                          const better=lowerIsBetter?d>0:d<0;
+                          return <span className="stat-delta" style={{color:better?'#2E7D32':'#C62828'}}>{better?'↓':'↑'}{Math.abs(d)}</span>;
+                        };
+                        return (
+                          <div className="stats-grid">
+                            {[
+                              {n:rd.stats.cong,  lbl:"정체구간", d:sliderVal>0?delta(rd.stats.cong,s0.cong):null,  color:rd.stats.cong>0?tc:'#0A0A0A'},
+                              {n:rd.stats.alley, lbl:"이면도로", d:sliderVal>0?delta(rd.stats.alley,s0.alley):null, color:rd.stats.alley>0?tc:'#0A0A0A'},
+                              {n:rd.stats.turns, lbl:"급회전",   d:sliderVal>0?delta(rd.stats.turns,s0.turns):null, color:rd.stats.turns>0?tc:'#0A0A0A'},
+                              {n:rd.stats.dist+"km", lbl:"거리", d:null, color:'#0A0A0A'},
+                            ].map(c=>(
+                              <div key={c.lbl} className="stat-cell">
+                                <span className="stat-num" style={{color:c.color}}>{c.n}</span>
+                                <span className="stat-lbl">{c.lbl}</span>
+                                {c.d}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <div className="msdv-row">
                         <span className="msdv-lbl">MSDV</span>
                         <div className="msdv-bg"><div className="msdv-fill" style={{width:`${rd.msdv}%`,background:TIER_CFG[sliderVal].color}}/></div>
