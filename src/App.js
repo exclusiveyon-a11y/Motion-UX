@@ -151,10 +151,10 @@ const styles = `
 
 // ─── Mock fallback ───
 const MOCK = [
-  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true}],                           price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[], stats:{cong:9,alley:4,turns:14,express:"2.8km"} },
-  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"도심 일부",m:true}],                               price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[], stats:{cong:5,alley:2,turns:9, express:"4.1km"} },
-  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[], stats:{cong:2,alley:0,turns:4, express:"4.1km"} },
-  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"노면 불량 구간 우회"},{t:"아스팔트 구간 위주"}],  price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[], stats:{cong:1,alley:0,turns:2, express:"4.1km"} },
+  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true},{t:"법정 최고속도",m:true}],                   price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[], stats:{cong:9,alley:4,turns:14,express:"2.8km"} },
+  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"완만한 가감속"},{t:"도심 일부",m:true}],                price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[], stats:{cong:5,alley:2,turns:9, express:"4.1km"} },
+  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"부드러운 가감속"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[], stats:{cong:2,alley:0,turns:4, express:"4.1km"} },
+  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"저속 순항"},{t:"급가감속 없음"}],                   price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[], stats:{cong:1,alley:0,turns:2, express:"4.1km"} },
 ];
 
 const SETTINGS = [
@@ -206,6 +206,9 @@ function extractLinks(data) {
       name:        f.properties?.name||"",
       coords:      f.geometry.coordinates,
       isExpressway:[0,1].includes(f.properties?.roadType??-1),
+      // mock: TMap은 제한속도·곡률 미제공 → 도로유형/회전유형으로 추정
+      speedLimit:  [0,1].includes(f.properties?.roadType??-1)?100:f.properties?.roadType===8?30:[2,3].includes(f.properties?.roadType??-1)?80:60,
+      curvature:   [12,13,14,16,17,18,19].includes(f.properties?.turnType??11)?0.02:0.001,
     }));
 }
 function extractPts(data) {
@@ -223,6 +226,19 @@ const TIER_CFG=[
   { color:'#D84315', bg:'#FFF6F2', muted:'#FFCCBC' },
   { color:'#2E7D32', bg:'#F4FAF5', muted:'#C8E6C9' },
   { color:'#1565C0', bg:'#EEF3FF', muted:'#BBDEFB' },
+];
+// ─── 속도 프로파일 (Notion: 차량 속도 변수 — 슬라이더 단계 차별화) ───
+// 최고속도 제한 / 순항속도 / 가감속도(종·횡) / Jerk 제한을 단계별로 정의
+// Jerk(저크): 가속도 변화율(m/s³) — 낮을수록 급격한 속도 변화 없음 → 멀미 억제
+const speedProfiles=[
+  { // 0: Sport — 법정 최대, Jerk 제한 없음
+    maxSpeedRatio:1.0, cruiseHighway:110, cruiseUrban:60, maxAccel:3.0, maxDecel:4.0, maxLateralAccel:3.0, jerkLimit:null },
+  { // 1: Natural — 법정 90%, Jerk 2.0 m/s³
+    maxSpeedRatio:0.9, cruiseHighway:100, cruiseUrban:55, maxAccel:2.0, maxDecel:2.5, maxLateralAccel:2.0, jerkLimit:2.0 },
+  { // 2: Comfort — 법정 80%, Jerk 1.0 m/s³
+    maxSpeedRatio:0.8, cruiseHighway:90,  cruiseUrban:50, maxAccel:1.2, maxDecel:1.5, maxLateralAccel:1.5, jerkLimit:1.0 },
+  { // 3: Anti-nausea — 법정 70%, Jerk 0.5 m/s³ (극도로 부드러운 가감속)
+    maxSpeedRatio:0.7, cruiseHighway:80,  cruiseUrban:45, maxAccel:0.8, maxDecel:1.0, maxLateralAccel:0.8, jerkLimit:0.5 },
 ];
 // ─── 한국도로공사 포장조사 기반 노면 등급 페널티 ───
 // 등급 1(최상)~5(최악), SD=포장 상태 점수 기준
@@ -250,6 +266,20 @@ function calcSurfacePenalty(links,tierIdx){
     }
   });
   return Math.round(total);
+}
+// 속도 프로파일 기반 MSDV 페널티: 순항속도 초과 구간 + 횡가속도 초과 (Notion 스펙)
+// 높은 가속도 → 차체 피치 → 0.1~0.5Hz 진동 → 멀미 유발
+// 낮은 가속도 + Jerk 제한 → 피치 최소화 → 멀미 억제
+function applySpeedPenalty(link, tierIdx) {
+  const profile = speedProfiles[tierIdx];
+  const targetSpeed = link.isExpressway ? profile.cruiseHighway : profile.cruiseUrban;
+  // 순항속도가 제한속도를 초과하면 과속 페널티
+  const speedOverrun = Math.max(0, targetSpeed - link.speedLimit);
+  const speedPenalty = speedOverrun * 0.3;
+  // 곡률 기반 횡가속도: v²×curvature, 프로파일 허용치 초과 시 페널티
+  const estimatedLateralAccel = Math.pow(targetSpeed / 3.6, 2) * (link.curvature ?? 0);
+  const lateralPenalty = Math.max(0, estimatedLateralAccel - profile.maxLateralAccel) * 5;
+  return speedPenalty + lateralPenalty;
 }
 function analyzePills(fastLinks, comfortLinks) {
   const fCong=fastLinks.filter(l=>l.congestion>=1).length;
@@ -320,9 +350,12 @@ async function buildRoutes(origin, dest) {
   const rBadSurf=rExpress.filter(l=>getMockSurfaceGrade(l.name)>=4).length;
   // Sport MSDV에 grade5 노면 페널티 추가 반영
   const rawT_sp=Math.min(95, rawT+calcSurfacePenalty(tLinks,1));
+  // 속도 프로파일 페널티: Sport(과속+Jerk무제한) > Natural(부분) > Comfort/Anti(없음)
+  const tSpeedPen=Math.min(12,Math.round(tLinks.reduce((s,l)=>s+applySpeedPenalty(l,0),0)));
+  const rSpeedPen=Math.min(6, Math.round(rLinks.reduce((s,l)=>s+applySpeedPenalty(l,1),0)));
   // 티어별 최솟값 보장
   const rm = Math.max(rawR, 35);
-  const tm = Math.max(rawT_sp, rm + 20, 55);
+  const tm = Math.min(95, Math.max(rawT_sp + tSpeedPen, rm + 20, 55));
 
   // 도로 환경 수치 (정체구간, 이면도로, 급회전, 고속구간)
   const tCong =tLinks.filter(l=>l.congestion>=1).length;
@@ -339,14 +372,20 @@ async function buildRoutes(origin, dest) {
   // 노면 불량 구간 우회 pill (Comfort)
   if(tBadSurf>0||tBadSurf>rBadSurf) comfortPills.push({t:"노면 불량 구간 우회"});
 
-  // Sport 경로 pill
-  const sportPills=[{t:`${ts.dist}km`}, tCong>0?{t:`정체 ${tCong}구간`,m:true}:{t:"급정거 多",m:true}];
+  // Sport 경로 pill (법정 최고속도 · Jerk 무제한)
+  const sportPills=[{t:`${ts.dist}km`}, tCong>0?{t:`정체 ${tCong}구간`,m:true}:{t:"급정거 多",m:true}, {t:"법정 최고속도",m:true}];
 
-  // Anti-nausea pill: 노면 데이터 기반 자동 생성
+  // Natural pill (완만한 가감속 추가)
+  const naturalPills=[{t:"간선도로 위주"},{t:"완만한 가감속"},{t:`${rs.dist}km`}];
+
+  // Comfort pill에 속도 여유 추가
+  if(comfortPills.length<3) comfortPills.push({t:"부드러운 가감속"});
+
+  // Anti-nausea pill: 저속 순항 + 노면/급가감속 없음
   const antiPills=[
     {t:"저주파 진동 최소"},
-    rBadSurf===0&&tBadSurf>0 ? {t:"노면 불량 구간 우회"} : {t:"큰길 위주"},
-    tExpress.length>rExpress.length ? {t:"아스팔트 구간 위주"} : (congDiff>0?{t:`급정거 ${congDiff}회 최소화`}:{t:"급정거 최소화"}),
+    {t:"저속 순항"},
+    rBadSurf===0&&tBadSurf>0 ? {t:"노면 불량 구간 우회"} : (congDiff>0?{t:`급정거 ${congDiff}회 최소화`}:{t:"급가감속 없음"}),
   ];
 
   const B=ts.fare, bm=ts.dur;
@@ -355,7 +394,7 @@ async function buildRoutes(origin, dest) {
 
   return [
     { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",    time:`${ts.dur}분`,   diff:"기본",          pills:sportPills,   price:f(B),      pdiff:"기본 요금",          preason:"추가 가산 없음",  bar:10, msdv:tm,                                    points:tp, stats:tStats },
-    { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}], price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:rm,                                    points:rp, stats:rStats },
+    { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:naturalPills, price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:Math.min(95,rm+rSpeedPen),                points:rp, stats:rStats },
     { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.max(15,Math.round(rm*0.48)),             points:rp, stats:rStats },
     { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.max(8, Math.round(rm*0.18)), points:rp, stats:rStats },
   ];
