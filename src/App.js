@@ -163,20 +163,54 @@ function calcMSDV(pts) {
   }
   return n===0 ? 50 : Math.round(Math.min(100,(total/n)*1.8+(sharp/n)*45));
 }
+// TMap GeoJSON에서 링크(도로 구간) 단위로 추출
+// roadType: 0=고속도로, 2=국도, 3=지방도, 5=특별시도, 6=광역시도, 8=이면도로
+// congestion: 0=원활, 1=서행, 2=정체
+// turnType: 11/184=직진, 12=좌회전, 13=우회전, 14=유턴, 16/17/18/19=사선
+function extractLinks(data) {
+  return (data?.features||[])
+    .filter(f=>f.geometry?.type==="LineString")
+    .map(f=>({
+      distance: f.properties?.distance||0,
+      roadType:  f.properties?.roadType??-1,
+      congestion:f.properties?.congestion??0,
+      turnType:  f.properties?.turnType??11,
+      name:      f.properties?.name||"",
+      coords:    f.geometry.coordinates,
+    }));
+}
 function extractPts(data) {
-  const pts=[];
-  for (const f of (data?.features||[])) {
-    if (f.geometry?.type==="LineString") {
-      for (const c of f.geometry.coordinates) pts.push({x:c[0],y:c[1]});
-    }
-  }
-  return pts;
+  return extractLinks(data).flatMap(l=>l.coords.map(c=>({x:c[0],y:c[1]})));
 }
 function extractSum(data) {
   const props=data?.features?.[0]?.properties||{};
   return { dur:Math.round((props.totalTime||0)/60), dist:((props.totalDistance||0)/1000).toFixed(1), fare:props.taxiFare||10800 };
 }
 
+// 두 경로를 비교해 실제 감소 수치를 pill로 생성
+const SHARP_TURNS=[12,13,14,16,17,18,19];
+function analyzePills(fastLinks, comfortLinks) {
+  const fCong=fastLinks.filter(l=>l.congestion>=1).length;
+  const cCong=comfortLinks.filter(l=>l.congestion>=1).length;
+  const fAlley=fastLinks.filter(l=>l.roadType===8).length;
+  const cAlley=comfortLinks.filter(l=>l.roadType===8).length;
+  const fTurns=fastLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
+  const cTurns=comfortLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
+  const congDiff=fCong-cCong, alleyDiff=fAlley-cAlley, turnDiff=fTurns-cTurns;
+  return {
+    congDiff, alleyDiff, turnDiff,
+    comfortPills: [
+      congDiff>0 ? {t:`급정거 ${congDiff}회 감소`} : null,
+      alleyDiff>0||cAlley<fAlley ? {t:"큰길 위주"} : null,
+      turnDiff>0 ? {t:"완만한 커브"} : {t:"완만한 커브"},
+    ].filter(Boolean).slice(0,3),
+    why: [
+      congDiff>0 ? "정체 구간 회피" : null,
+      alleyDiff>0 ? "이면도로 최소화" : null,
+      "완만한 커브 · 큰길 위주",
+    ].filter(Boolean)[0] || "완만한 커브 · 큰길 위주",
+  };
+}
 
 // ─── 장소 검색 (서버 프록시) ───
 function usePlaces() {
@@ -207,17 +241,35 @@ async function buildRoutes(origin, dest) {
     fetch(`/api/directions?${p}&searchOption=0`).then(r=>r.json()),
     fetch(`/api/directions?${p}&searchOption=2`).then(r=>r.json()),
   ]);
+
+  const tLinks=extractLinks(td), rLinks=extractLinks(rd);
   const tp=extractPts(td), rp=extractPts(rd);
   const ts=extractSum(td), rs=extractSum(rd);
   const tm=calcMSDV(tp), rm=calcMSDV(rp);
+
+  // 실제 도로 데이터 기반 pill 생성
+  const { comfortPills, why: comfortWhy, congDiff } = analyzePills(tLinks, rLinks);
+
+  // Sport 경로 pill: 실제 정체 구간 수 반영
+  const tCong=tLinks.filter(l=>l.congestion>=1).length;
+  const sportPills=[{t:`${ts.dist}km`}, tCong>0?{t:`정체 ${tCong}구간`,m:true}:{t:"급정거 多",m:true}];
+
+  // Anti-nausea pill: comfort 대비 추가 감소 수치
+  const antiPills=[
+    {t:"저주파 진동 최소"},
+    {t:"큰길 위주"},
+    congDiff>0?{t:`급정거 ${congDiff}회 최소화`}:{t:"급정거 최소화"},
+  ];
+
   const B=ts.fare, bm=ts.dur;
   const f=n=>`₩${Math.round(n).toLocaleString()}`;
   const dm=m=>m<=0?"기본":`+${m}분`;
+
   return [
-    { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                time:`${ts.dur}분`,   diff:"기본",          pills:[{t:`${ts.dist}km`},{t:"급정거 多",m:true}],            price:f(B),      pdiff:"기본 요금",         preason:"추가 가산 없음",  bar:10, msdv:tm,                   points:tp },
-    { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",           time:`${rs.dur}분`,   diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}],                price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",   bar:36, msdv:rm,                   points:rp },
-    { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}], price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`,preason:"편안함 경로 가산",bar:65, msdv:Math.round(rm*0.62),points:rp },
-    { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:[{t:"저주파 진동 최소"},{t:"큰길 위주"},{t:"급정거 최소화"}],price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`,preason:"최적 편안 가산",  bar:90, msdv:Math.round(rm*0.30),points:rp },
+    { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",    time:`${ts.dur}분`,   diff:"기본",          pills:sportPills,   price:f(B),      pdiff:"기본 요금",          preason:"추가 가산 없음",  bar:10, msdv:tm,                   points:tp },
+    { badge:"Natural",     name:"일반 경로",       why:"간선도로 위주 · 무난한 이동",time:`${rs.dur}분`, diff:dm(rs.dur-bm),   pills:[{t:"간선도로 위주"},{t:`${rs.dist}km`}], price:f(B*1.06), pdiff:`+${f(B*0.06)} (+6%)`, preason:"간선도로 가산",  bar:36, msdv:rm,                   points:rp },
+    { badge:"Comfort",     name:"멀미 저감 경로",  why:comfortWhy,               time:`${rs.dur+2}분`, diff:dm(rs.dur+2-bm), pills:comfortPills, price:f(B*1.15), pdiff:`+${f(B*0.15)} (+15%)`, preason:"편안함 경로 가산", bar:65, msdv:Math.round(rm*0.62),points:rp },
+    { badge:"Anti-nausea", name:"최적 편안 경로",  why:"저주파 진동 최소 · 큰길 + 완만한 커브", time:`${rs.dur+4}분`, diff:dm(rs.dur+4-bm), pills:antiPills, price:f(B*1.28), pdiff:`+${f(B*0.28)} (+28%)`, preason:"최적 편안 가산",  bar:90, msdv:Math.round(rm*0.30),points:rp },
   ];
 }
 
