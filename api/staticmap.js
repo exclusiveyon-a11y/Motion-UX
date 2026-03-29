@@ -22,15 +22,40 @@ export default async function handler(req, res) {
   }
 
   const params = new URLSearchParams();
+  let hasCoordType = false;
+  let hasMarkers = false;
+
   for (const [k, v] of Object.entries(req.query || {})) {
     if (k === "appKey") continue;
 
-    const key = k === "centerLon" ? "lon" : k === "centerLat" ? "lat" : k;
+    const key =
+      k === "centerLon"
+        ? "lon"
+        : k === "centerLat"
+          ? "lat"
+          : k === "marker1"
+            ? "markers"
+            : k;
+
+    if (key === "coordType") hasCoordType = true;
+    if (key === "markers") hasMarkers = true;
 
     if (Array.isArray(v)) {
       v.forEach((val) => params.append(key, String(val)));
     } else if (v != null) {
       params.append(key, String(v));
+    }
+  }
+
+  if (!hasCoordType) {
+    params.append("coordType", "WGS84GEO");
+  }
+
+  if (!hasMarkers) {
+    const lon = req.query?.centerLon ?? req.query?.lon;
+    const lat = req.query?.centerLat ?? req.query?.lat;
+    if (lon != null && lat != null) {
+      params.append("markers", `${lon},${lat}`);
     }
   }
 
@@ -57,6 +82,7 @@ export default async function handler(req, res) {
         status: r.status,
         details: txt,
         requestUrl: url,
+        tip: "TMap StaticMap usually expects coordType=WGS84GEO and markers instead of marker1.",
       });
       return;
     }
