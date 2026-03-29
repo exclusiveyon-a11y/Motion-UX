@@ -25,6 +25,20 @@ export default async function handler(req, res) {
   let hasCoordType = false;
   let hasMarkers = false;
 
+  const normalizeMarkerValue = (raw) => {
+    const parts = String(raw)
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length >= 2) {
+      const [lon, lat] = parts;
+      return `${lat},${lon}`;
+    }
+
+    return String(raw);
+  };
+
   for (const [k, v] of Object.entries(req.query || {})) {
     if (k === "appKey") continue;
 
@@ -41,9 +55,13 @@ export default async function handler(req, res) {
     if (key === "markers") hasMarkers = true;
 
     if (Array.isArray(v)) {
-      v.forEach((val) => params.append(key, String(val)));
+      v.forEach((val) => {
+        const value = key === "markers" ? normalizeMarkerValue(val) : String(val);
+        params.append(key, value);
+      });
     } else if (v != null) {
-      params.append(key, String(v));
+      const value = key === "markers" ? normalizeMarkerValue(v) : String(v);
+      params.append(key, value);
     }
   }
 
@@ -55,7 +73,7 @@ export default async function handler(req, res) {
     const lon = req.query?.centerLon ?? req.query?.lon;
     const lat = req.query?.centerLat ?? req.query?.lat;
     if (lon != null && lat != null) {
-      params.append("markers", `${lon},${lat}`);
+      params.append("markers", `${lat},${lon}`);
     }
   }
 
@@ -82,7 +100,7 @@ export default async function handler(req, res) {
         status: r.status,
         details: txt,
         requestUrl: url,
-        tip: "TMap StaticMap usually expects coordType=WGS84GEO and markers instead of marker1.",
+        tip: "TMap StaticMap expects lon/lat for center and markers in lat,lon order.",
       });
       return;
     }
