@@ -62,10 +62,16 @@ const styles = `
   input[type=range] { width: 100%; accent-color: #0A0A0A; cursor: pointer; height: 20px; }
   .msdv-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #F0EEE8; }
   .msdv-lbl { font-size: 10px; color: #888; font-family: 'DM Mono', monospace; }
-  .msdv-bg { flex: 1; height: 4px; background: #E0DED8; border-radius: 2px; }
-  .msdv-fill { height: 4px; border-radius: 2px; transition: width .4s, background .4s; }
+  .msdv-bg { flex: 1; height: 8px; background: #E0DED8; border-radius: 4px; }
+  .msdv-fill { height: 8px; border-radius: 4px; transition: width .5s cubic-bezier(.4,0,.2,1), background .4s; }
   .msdv-val { font-size: 10px; font-weight: 600; font-family: 'DM Mono', monospace; white-space: nowrap; }
-  .route-card { background: #F5F3EE; border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .tier-tabs { display:flex; gap:5px; margin-bottom:10px; }
+  .tier-tab { flex:1; padding:8px 4px 7px; border-radius:10px; border:1.5px solid #E0DED8; cursor:pointer; text-align:center; transition:all .2s; background:#fff; }
+  .tier-tab-name { font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; font-family:'DM Mono',monospace; margin-bottom:5px; }
+  .tier-tab-mini { height:3px; border-radius:2px; margin:0 6px 4px; background:#E8E6E0; overflow:hidden; }
+  .tier-tab-val { font-size:10px; font-family:'DM Mono',monospace; font-weight:700; }
+  .improve-chip { display:inline-block; font-size:10px; padding:3px 9px; border-radius:20px; font-family:'DM Mono',monospace; font-weight:600; margin-top:6px; }
+  .route-card { border-radius:14px; padding:14px; margin-bottom:12px; }
   .rc-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
   .rc-name { font-size: 14px; font-weight: 600; }
   .rc-why  { font-size: 11px; color: #666; margin-top: 3px; line-height: 1.4; }
@@ -130,6 +136,10 @@ const styles = `
   .btn-primary:active { opacity: .8; }
   .btn-ghost { width: 100%; padding: 13px; background: transparent; color: #888; border: 1px solid #D0CEC8; border-radius: 16px; font-size: 14px; cursor: pointer; font-family: 'DM Sans', sans-serif; margin-top: 8px; }
   .err-banner { background: #FFF3F3; border: 1px solid #FFCDD2; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #C62828; }
+  .loc-btn { position:absolute; bottom:12px; right:12px; width:34px; height:34px; background:#fff; border:1px solid #D0CEC8; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.12); z-index:5; transition:opacity .15s; }
+  .loc-btn:active { opacity:.7; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .loc-spin { animation:spin .8s linear infinite; }
   .route-summary-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #F5F3EE; border-radius: 12px; margin-bottom: 12px; }
   .setting-status { border: 1px solid #E0DED8; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
 `;
@@ -202,6 +212,12 @@ function extractSum(data) {
 
 // 두 경로를 비교해 실제 감소 수치를 pill로 생성
 const SHARP_TURNS=[12,13,14,16,17,18,19];
+const TIER_CFG=[
+  { color:'#C62828', bg:'#FFF5F5', muted:'#FFCDD2' },
+  { color:'#D84315', bg:'#FFF6F2', muted:'#FFCCBC' },
+  { color:'#2E7D32', bg:'#F4FAF5', muted:'#C8E6C9' },
+  { color:'#1565C0', bg:'#EEF3FF', muted:'#BBDEFB' },
+];
 function analyzePills(fastLinks, comfortLinks) {
   const fCong=fastLinks.filter(l=>l.congestion>=1).length;
   const cCong=comfortLinks.filter(l=>l.congestion>=1).length;
@@ -359,7 +375,6 @@ function TMapMap({ center, routes=[], markers=[], height=220 }) {
 }
 
 
-const msdvColor = s => s<25?"#2E7D32":s<50?"#F57F17":"#C62828";
 const msdvLabel = s => s<25?"매우 편안":s<45?"편안":s<65?"보통":"불편";
 
 // ─── 메인 ───
@@ -372,6 +387,7 @@ export default function App() {
   const carDir = useRef(1);
 
   const [loc, setLoc]         = useState({ lat:37.5665, lng:126.9780 });
+  const [locating, setLocating] = useState(false);
   const [dest, setDest]       = useState(null);
   const [query, setQuery]     = useState("");
   const [routes, setRoutes]   = useState(null);
@@ -394,6 +410,16 @@ export default function App() {
     const iv=setInterval(()=>setCarX(x=>{ const n=x+carDir.current*.5; if(n>lim){carDir.current=-1;return lim;} if(n<sx){carDir.current=1;return sx;} return n; }),80);
     return ()=>clearInterval(iv);
   },[step]);
+
+  const refreshLoc = useCallback(() => {
+    if (locating) return;
+    setLocating(true);
+    navigator.geolocation?.getCurrentPosition(
+      p => { setLoc({ lat:p.coords.latitude, lng:p.coords.longitude }); setLocating(false); },
+      () => setLocating(false),
+      { timeout:8000, maximumAge:0 }
+    );
+  }, [locating]);
 
   const onQueryChange = q => { setQuery(q); setDest(null); search(q); };
   const onPickDest = p => { setDest(p); setQuery(p.name); clear(); };
@@ -437,15 +463,23 @@ export default function App() {
 
           {/* ── STEP 1 ── */}
           {step===1 && <>
-            {tmap
-              ? <TMapMap key="map1" center={loc} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
-              : <div className="map-fallback" style={{height:240}}>
-                  <div className="map-grid-h" style={{top:"38%"}}/><div className="map-grid-h" style={{top:"65%"}}/>
-                  <div className="map-grid-v" style={{left:"30%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
-                  <div className="map-dot" style={{top:"50%",left:"50%"}}/>
-                  <div className="map-tag">현재 위치</div>
-                </div>
-            }
+            <div style={{position:"relative"}}>
+              {tmap
+                ? <TMapMap key={`map1-${loc.lat}-${loc.lng}`} center={loc} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
+                : <div className="map-fallback" style={{height:240}}>
+                    <div className="map-grid-h" style={{top:"38%"}}/><div className="map-grid-h" style={{top:"65%"}}/>
+                    <div className="map-grid-v" style={{left:"30%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
+                    <div className="map-dot" style={{top:"50%",left:"50%"}}/>
+                    <div className="map-tag">현재 위치</div>
+                  </div>
+              }
+              <button className="loc-btn" onClick={refreshLoc} title="내 위치 새로고침">
+                <svg className={locating?"loc-spin":""} width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="2.5" stroke="#0A0A0A" strokeWidth="1.5"/>
+                  <path d="M8 1v2.5M8 12.5V15M1 8h2.5M12.5 8H15" stroke="#0A0A0A" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
             <div className="pad">
               <div className="input-card">
                 <div className="input-row">
@@ -503,38 +537,46 @@ export default function App() {
                   }
                   <div className="pad">
                     {err && <div className="err-banner">경로 탐색 실패 — 샘플 데이터로 표시합니다</div>}
-                    <div className="slider-card">
-                      <div className="slider-top">
-                        <span className="slider-title">어떻게 타고 싶으세요?</span>
-                        <span className="slider-badge">{rd.badge}</span>
-                      </div>
-                      <input type="range" min={0} max={3} value={sliderVal} step={1} onChange={e=>setSlider(+e.target.value)}/>
-                      <div className="slider-ticks">
-                        {["Sport","Natural","Comfort","Anti-nausea"].map((l,i)=>(
-                          <span key={l} className={`tick${i===sliderVal?" on":""}`} onClick={()=>setSlider(i)}>{l}</span>
-                        ))}
-                      </div>
-                      <div className="msdv-row">
-                        <span className="msdv-lbl">MSDV</span>
-                        <div className="msdv-bg"><div className="msdv-fill" style={{width:`${rd.msdv}%`,background:msdvColor(rd.msdv)}}/></div>
-                        <span className="msdv-val" style={{color:msdvColor(rd.msdv)}}>{rd.msdv} — {msdvLabel(rd.msdv)}</span>
-                      </div>
+                    {/* 티어 탭 — 4개 경로 한눈에 비교 */}
+                    <div className="tier-tabs">
+                      {list.map((r,i)=>{
+                        const tc=TIER_CFG[i]; const on=i===sliderVal;
+                        return (
+                          <div key={r.badge} className="tier-tab"
+                            style={{borderColor:on?tc.color:'#E0DED8',background:on?tc.bg:'#fff'}}
+                            onClick={()=>setSlider(i)}>
+                            <div className="tier-tab-name" style={{color:on?tc.color:'#B0AEA8'}}>{r.badge}</div>
+                            <div className="tier-tab-mini"><div style={{height:'100%',width:`${r.bar}%`,background:tc.color,borderRadius:2}}/></div>
+                            <div className="tier-tab-val" style={{color:on?tc.color:'#C8C6C0'}}>{r.msdv}</div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="route-card">
+                    {/* 경로 카드 — 티어 색상 강조 */}
+                    <div className="route-card" style={{borderLeft:`4px solid ${TIER_CFG[sliderVal].color}`,background:TIER_CFG[sliderVal].bg,paddingLeft:12}}>
                       <div className="rc-top">
-                        <div><div className="rc-name">{rd.name}</div><div className="rc-why">{rd.why}</div></div>
+                        <div>
+                          <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',fontFamily:"'DM Mono',monospace",color:TIER_CFG[sliderVal].color,marginBottom:3,textTransform:'uppercase'}}>{rd.badge}</div>
+                          <div className="rc-name">{rd.name}</div><div className="rc-why">{rd.why}</div>
+                        </div>
                         <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                           <div className="rc-time">{rd.time}</div><div className="rc-diff">{rd.diff}</div>
                         </div>
                       </div>
-                      <div className="pills">{rd.pills.map(p=><span key={p.t} className={p.m?"pill-muted":"pill"}>{p.t}</span>)}</div>
+                      <div className="pills">{rd.pills.map(p=><span key={p.t} className={p.m?"pill-muted":"pill"} style={p.m?{}:{borderColor:TIER_CFG[sliderVal].color,color:TIER_CFG[sliderVal].color}}>{p.t}</span>)}</div>
+                      <div className="msdv-row">
+                        <span className="msdv-lbl">MSDV</span>
+                        <div className="msdv-bg"><div className="msdv-fill" style={{width:`${rd.msdv}%`,background:TIER_CFG[sliderVal].color}}/></div>
+                        <span className="msdv-val" style={{color:TIER_CFG[sliderVal].color}}>{rd.msdv} — {msdvLabel(rd.msdv)}</span>
+                      </div>
+                      {sliderVal>0 && <span className="improve-chip" style={{background:TIER_CFG[sliderVal].bg,color:TIER_CFG[sliderVal].color,border:`1px solid ${TIER_CFG[sliderVal].muted}`}}>Sport 대비 멀미 {Math.round((list[0].msdv-rd.msdv)/list[0].msdv*100)}% 감소</span>}
                       <div className="price-row">
                         <div><div className="price-main">{rd.price}</div><div className="price-base">기본 요금 {list[0].price}</div></div>
                         <div style={{textAlign:"right"}}><div className="price-diff">{rd.pdiff}</div><div className="price-rsn">{rd.preason}</div></div>
                       </div>
                       <div className="tradeoff">
                         <span className="to-lbl">빠름</span>
-                        <div className="to-bg"><div className="to-fill" style={{width:`${rd.bar}%`}}/></div>
+                        <div className="to-bg"><div className="to-fill" style={{width:`${rd.bar}%`,background:TIER_CFG[sliderVal].color}}/></div>
                         <span className="to-lbl">편안함</span>
                       </div>
                     </div>
