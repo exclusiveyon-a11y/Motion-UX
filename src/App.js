@@ -151,10 +151,10 @@ const styles = `
 
 // ─── Mock fallback ───
 const MOCK = [
-  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true}],                           price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[], stats:{cong:9,alley:4,turns:14,dist:"10.2"} },
-  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"도심 일부",m:true}],                               price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[], stats:{cong:5,alley:2,turns:9, dist:"11.5"} },
-  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[], stats:{cong:2,alley:0,turns:4, dist:"12.1"} },
-  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"큰길 위주"},{t:"급정거 최소화"}],               price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[], stats:{cong:1,alley:0,turns:2, dist:"13.2"} },
+  { badge:"Sport",       name:"최단 경로",      why:"도심 경유 · 빠른 이동",                  time:"23분", diff:"기본",  pills:[{t:"도심 경유",m:true},{t:"정체 구간",m:true}],                           price:"₩10,800", pdiff:"기본 요금",          preason:"추가 가산 없음",   bar:10, msdv:72, points:[], stats:{cong:9,alley:4,turns:14,express:"2.8km"} },
+  { badge:"Natural",     name:"일반 경로",      why:"간선도로 위주 · 무난한 이동",             time:"25분", diff:"+2분", pills:[{t:"간선도로 위주"},{t:"도심 일부",m:true}],                               price:"₩11,500", pdiff:"+₩700 (+6%)",       preason:"간선도로 가산",    bar:36, msdv:55, points:[], stats:{cong:5,alley:2,turns:9, express:"4.1km"} },
+  { badge:"Comfort",     name:"멀미 저감 경로", why:"완만한 커브 · 큰길 위주",                 time:"27분", diff:"+4분", pills:[{t:"급정거 3회 감소"},{t:"큰길 위주"},{t:"완만한 커브"}],                  price:"₩12,400", pdiff:"+₩1,600 (+15%)",    preason:"편안함 경로 가산", bar:65, msdv:36, points:[], stats:{cong:2,alley:0,turns:4, express:"4.1km"} },
+  { badge:"Anti-nausea", name:"최적 편안 경로", why:"저주파 진동 최소 · 큰길 + 완만한 커브",   time:"29분", diff:"+6분", pills:[{t:"저주파 진동 최소"},{t:"노면 불량 구간 우회"},{t:"아스팔트 구간 위주"}],  price:"₩13,800", pdiff:"+₩3,000 (+28%)",    preason:"최적 편안 가산",  bar:90, msdv:18, points:[], stats:{cong:1,alley:0,turns:2, express:"4.1km"} },
 ];
 
 const SETTINGS = [
@@ -224,6 +224,33 @@ const TIER_CFG=[
   { color:'#2E7D32', bg:'#F4FAF5', muted:'#C8E6C9' },
   { color:'#1565C0', bg:'#EEF3FF', muted:'#BBDEFB' },
 ];
+// ─── 한국도로공사 포장조사 기반 노면 등급 페널티 ───
+// 등급 1(최상)~5(최악), SD=포장 상태 점수 기준
+const SURFACE_GRADE_PENALTY={1:0,2:3,3:8,4:15,5:25};
+// 티어별 페널티 적용 등급 임계값: null=미적용, n=해당 이상 등급에 페널티 부여
+// Sport=미적용 / Natural=5등급만 / Comfort=4~5 / Anti-nausea=3~5
+const TIER_SURFACE_THRESHOLD=[null,5,4,3];
+// 노선명 기반 노면 등급 추정 (mock — 한국도로공사 CSV 미연동 상태)
+function getMockSurfaceGrade(name=''){
+  if(name.includes('경부')||name.includes('서해안')||name.includes('올림픽')||name.includes('강변')) return 2;
+  if(name.includes('외곽')||name.includes('순환')||name.includes('영동')||name.includes('경인')||name.includes('중부')) return 3;
+  return 2; // 기본: 양호
+}
+// 고속도로 구간 노면 페널티 (거리 비례 + RAMP 급커브 보정)
+function calcSurfacePenalty(links,tierIdx){
+  const thr=TIER_SURFACE_THRESHOLD[tierIdx];
+  if(!thr) return 0;
+  let total=0;
+  links.filter(l=>l.isExpressway).forEach(l=>{
+    const grade=getMockSurfaceGrade(l.name);
+    if(grade>=thr){
+      const pen=SURFACE_GRADE_PENALTY[grade]??0;
+      const ramp=l.turnType>=100?5:0; // RAMP 구간: 콘크리트 이음새 급커브 보정
+      total+=(pen+ramp)*Math.min(l.distance/1000,3);
+    }
+  });
+  return Math.round(total);
+}
 function analyzePills(fastLinks, comfortLinks) {
   const fCong=fastLinks.filter(l=>l.congestion>=1).length;
   const cCong=comfortLinks.filter(l=>l.congestion>=1).length;
@@ -283,31 +310,43 @@ async function buildRoutes(origin, dest) {
   // 종합 MSDV: 기하 커브 + 정체 + 이면도로 + 급회전 패널티 합산
   const rawT=calcRouteMSDV(tp, tLinks);
   const rawR=calcRouteMSDV(rp, rLinks);
-  // 티어별 최솟값 보장: Sport≥55, Natural≥35, Sport는 Natural보다 최소 20 높게
-  const rm = Math.max(rawR, 35);
-  const tm = Math.max(rawT, rm + 20, 55);
 
-  // 도로 환경 수치 (정체구간, 이면도로, 급회전)
+  // 고속도로 구간 노면 분석 (한국도로공사 포장조사 기반 mock)
+  const tExpress=tLinks.filter(l=>l.isExpressway);
+  const rExpress=rLinks.filter(l=>l.isExpressway);
+  const tExpKm=+(tExpress.reduce((s,l)=>s+l.distance,0)/1000).toFixed(1);
+  const rExpKm=+(rExpress.reduce((s,l)=>s+l.distance,0)/1000).toFixed(1);
+  const tBadSurf=tExpress.filter(l=>getMockSurfaceGrade(l.name)>=4).length;
+  const rBadSurf=rExpress.filter(l=>getMockSurfaceGrade(l.name)>=4).length;
+  // Sport MSDV에 grade5 노면 페널티 추가 반영
+  const rawT_sp=Math.min(95, rawT+calcSurfacePenalty(tLinks,1));
+  // 티어별 최솟값 보장
+  const rm = Math.max(rawR, 35);
+  const tm = Math.max(rawT_sp, rm + 20, 55);
+
+  // 도로 환경 수치 (정체구간, 이면도로, 급회전, 고속구간)
   const tCong =tLinks.filter(l=>l.congestion>=1).length;
   const tAlley=tLinks.filter(l=>l.roadType===8).length;
   const tTurns=tLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
   const rCong =rLinks.filter(l=>l.congestion>=1).length;
   const rAlley=rLinks.filter(l=>l.roadType===8).length;
   const rTurns=rLinks.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
-  const tStats={cong:tCong,alley:tAlley,turns:tTurns,dist:ts.dist};
-  const rStats={cong:rCong,alley:rAlley,turns:rTurns,dist:rs.dist};
+  const tStats={cong:tCong,alley:tAlley,turns:tTurns,express:`${tExpKm}km`};
+  const rStats={cong:rCong,alley:rAlley,turns:rTurns,express:`${rExpKm}km`};
 
   // 실제 도로 데이터 기반 pill 생성
   const { comfortPills, why: comfortWhy, congDiff } = analyzePills(tLinks, rLinks);
+  // 노면 불량 구간 우회 pill (Comfort)
+  if(tBadSurf>0||tBadSurf>rBadSurf) comfortPills.push({t:"노면 불량 구간 우회"});
 
-  // Sport 경로 pill: 실제 정체 구간 수 반영
+  // Sport 경로 pill
   const sportPills=[{t:`${ts.dist}km`}, tCong>0?{t:`정체 ${tCong}구간`,m:true}:{t:"급정거 多",m:true}];
 
-  // Anti-nausea pill: comfort 대비 추가 감소 수치
+  // Anti-nausea pill: 노면 데이터 기반 자동 생성
   const antiPills=[
     {t:"저주파 진동 최소"},
-    {t:"큰길 위주"},
-    congDiff>0?{t:`급정거 ${congDiff}회 최소화`}:{t:"급정거 최소화"},
+    rBadSurf===0&&tBadSurf>0 ? {t:"노면 불량 구간 우회"} : {t:"큰길 위주"},
+    tExpress.length>rExpress.length ? {t:"아스팔트 구간 위주"} : (congDiff>0?{t:`급정거 ${congDiff}회 최소화`}:{t:"급정거 최소화"}),
   ];
 
   const B=ts.fare, bm=ts.dur;
@@ -594,7 +633,7 @@ export default function App() {
                               {n:rd.stats.cong,  lbl:"정체구간", d:sliderVal>0?delta(rd.stats.cong,s0.cong):null,  color:rd.stats.cong>0?tc:'#0A0A0A'},
                               {n:rd.stats.alley, lbl:"이면도로", d:sliderVal>0?delta(rd.stats.alley,s0.alley):null, color:rd.stats.alley>0?tc:'#0A0A0A'},
                               {n:rd.stats.turns, lbl:"급회전",   d:sliderVal>0?delta(rd.stats.turns,s0.turns):null, color:rd.stats.turns>0?tc:'#0A0A0A'},
-                              {n:rd.stats.dist+"km", lbl:"거리", d:null, color:'#0A0A0A'},
+                              {n:rd.stats.express, lbl:"고속구간", d:null, color:'#0A0A0A'},
                             ].map(c=>(
                               <div key={c.lbl} className="stat-cell">
                                 <span className="stat-num" style={{color:c.color}}>{c.n}</span>
