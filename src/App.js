@@ -165,12 +165,16 @@ function calcMSDV(pts) {
 }
 function extractPts(data) {
   const pts=[];
-  for (const sec of (data?.routes?.[0]?.sections||[])) for (const r of (sec.roads||[])) { const v=r.vertexes||[]; for (let i=0;i<v.length-1;i+=2) pts.push({x:v[i],y:v[i+1]}); }
+  for (const f of (data?.features||[])) {
+    if (f.geometry?.type==="LineString") {
+      for (const c of f.geometry.coordinates) pts.push({x:c[0],y:c[1]});
+    }
+  }
   return pts;
 }
 function extractSum(data) {
-  const s=data?.routes?.[0]?.summary||{};
-  return { dur:Math.round((s.duration||0)/60), dist:((s.distance||0)/1000).toFixed(1), fare:s.fare?.taxi||10800 };
+  const props=data?.features?.[0]?.properties||{};
+  return { dur:Math.round((props.totalTime||0)/60), dist:((props.totalDistance||0)/1000).toFixed(1), fare:props.taxiFare||10800 };
 }
 
 
@@ -185,10 +189,10 @@ function usePlaces() {
       try {
         const r = await fetch(`/api/places?query=${encodeURIComponent(q)}`);
         const data = await r.json();
-        setResults((data.documents||[]).slice(0,5).map(d=>({
-          name: d.place_name,
-          addr: d.road_address_name || d.address_name,
-          lat: +d.y, lng: +d.x,
+        setResults((data.searchPoiInfo?.pois?.poi||[]).slice(0,5).map(d=>({
+          name: d.name,
+          addr: d.newAddressList?.newAddress?.[0]?.fullAddressRoad || [d.upperAddrName,d.middleAddrName,d.lowerAddrName].filter(Boolean).join(" "),
+          lat: +d.frontLat, lng: +d.frontLon,
         })));
       } catch { setResults([]); }
     }, 250);
@@ -198,10 +202,10 @@ function usePlaces() {
 
 // ─── 경로 탐색 ───
 async function buildRoutes(origin, dest) {
-  const o=`${origin.lng},${origin.lat}`, d=`${dest.lng},${dest.lat}`;
+  const p=`startX=${origin.lng}&startY=${origin.lat}&endX=${dest.lng}&endY=${dest.lat}`;
   const [td,rd] = await Promise.all([
-    fetch(`/api/directions?origin=${o}&destination=${d}&priority=TIME`).then(r=>r.json()),
-    fetch(`/api/directions?origin=${o}&destination=${d}&priority=RECOMMEND`).then(r=>r.json()),
+    fetch(`/api/directions?${p}&searchOption=0`).then(r=>r.json()),
+    fetch(`/api/directions?${p}&searchOption=2`).then(r=>r.json()),
   ]);
   const tp=extractPts(td), rp=extractPts(rd);
   const ts=extractSum(td), rs=extractSum(rd);
@@ -217,44 +221,87 @@ async function buildRoutes(origin, dest) {
   ];
 }
 
-// ─── KakaoStaticMap 컴포넌트 ───
-function KakaoStaticMap({ center, routes=[], markers=[], height=220 }) {
-  function ds(pts, max) {
-    if (!pts?.length) return [];
-    if (pts.length <= max) return pts;
-    const step = (pts.length - 1) / (max - 1);
-    return Array.from({length: max}, (_, i) => pts[Math.round(i * step)]);
-  }
-  function calcLevel(allPts) {
-    if (!allPts.length) return 6;
-    const lats = allPts.map(p => p.y), lngs = allPts.map(p => p.x);
-    const span = Math.max(Math.max(...lats)-Math.min(...lats), Math.max(...lngs)-Math.min(...lngs));
-    if (span > 0.3) return 9; if (span > 0.1) return 8; if (span > 0.05) return 7;
-    if (span > 0.02) return 6; if (span > 0.01) return 5; return 4;
-  }
-  const allPts = routes.flatMap(r => r.points||[]);
-  const level = allPts.length > 1 ? calcLevel(allPts) : 6;
-  let mc = center;
-  if (allPts.length > 1) {
-    const lats=allPts.map(p=>p.y), lngs=allPts.map(p=>p.x);
-    mc = { lat:(Math.max(...lats)+Math.min(...lats))/2, lng:(Math.max(...lngs)+Math.min(...lngs))/2 };
-  }
-  const params = new URLSearchParams({ center:`${mc.lng},${mc.lat}`, level, w:390, h:height });
-  routes.filter(r=>!r.active&&r.points?.length).forEach(r=>{
-    const pos=ds(r.points,30).map(p=>`${p.x} ${p.y}`).join(' ');
-    params.append('path',`color(0xBFBDB4)width(2)pos(${pos})`);
-  });
-  const active=routes.find(r=>r.active);
-  if (active?.points?.length) {
-    const pos=ds(active.points,60).map(p=>`${p.x} ${p.y}`).join(' ');
-    params.append('path',`color(0x0A0A0A)width(6)pos(${pos})`);
-  }
-  markers.forEach((m,i)=>params.append('markers',`color(${i===0?'0x0A0A0A':'0xFFFFFF'})size(small)pos(${m.lng} ${m.lat})`));
-  return (
-    <div style={{width:"100%",height,background:"#E8E6E0",overflow:"hidden"}}>
-      <img src={`/api/staticmap?${params.toString()}`} alt="지도" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-    </div>
-  );
+// ─── TMap SDK 로더 ───
+const TMAP_KEY = "jd4lOOp2nI2dHWR4Rb2vE20d6C2fy4455wjVRVlu";
+function useTmap() {
+  const [ready, setReady] = useState(!!window.Tmapv3);
+  useEffect(() => {
+    if (window.Tmapv3) { setReady(true); return; }
+    const s = document.createElement("script");
+    s.src = `https://apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=${TMAP_KEY}`;
+    s.onload = () => setReady(true);
+    s.onerror = () => console.error("TMap SDK load failed");
+    document.head.appendChild(s);
+  }, []);
+  return ready;
+}
+
+// ─── TMapMap 컴포넌트 ───
+function TMapMap({ center, routes=[], markers=[], height=220 }) {
+  const ref = useRef(null);
+  const mapRef = useRef(null);
+  const objs = useRef([]);
+
+  useEffect(() => {
+    if (!ref.current || !window.Tmapv3) return;
+    const T = window.Tmapv3;
+    if (mapRef.current) { try { mapRef.current.destroy(); } catch(e){} mapRef.current = null; }
+    mapRef.current = new T.Map(ref.current, {
+      center: new T.LatLng(center.lat, center.lng),
+      zoom: 14,
+      zoomControl: false,
+      scrollwheel: false,
+    });
+    return () => { if (mapRef.current) { try { mapRef.current.destroy(); } catch(e){} mapRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !window.Tmapv3) return;
+    const T = window.Tmapv3;
+    objs.current.forEach(o => { try { o.setMap(null); } catch(e){} });
+    objs.current = [];
+
+    routes.forEach(r => {
+      if (!r.points?.length) return;
+      const poly = new T.Polyline({
+        path: r.points.map(p => new T.LatLng(p.y, p.x)),
+        strokeColor: r.active ? "#0A0A0A" : "#BFBDB4",
+        strokeWeight: r.active ? 6 : 2,
+        strokeOpacity: r.active ? 1 : 0.45,
+        map: mapRef.current,
+      });
+      objs.current.push(poly);
+    });
+
+    markers.forEach((m, i) => {
+      const svg = i===0
+        ? `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><circle cx="6" cy="6" r="6" fill="#0A0A0A"/></svg>`
+        : `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><circle cx="6" cy="6" r="5" fill="#fff" stroke="#0A0A0A" stroke-width="2"/></svg>`;
+      const marker = new T.Marker({
+        position: new T.LatLng(m.lat, m.lng),
+        map: mapRef.current,
+        icon: new T.Icon({
+          url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+          size: new T.Size(12, 12),
+          anchor: new T.Point(6, 6),
+        }),
+      });
+      objs.current.push(marker);
+    });
+
+    const allPts = routes.flatMap(r=>(r.points||[]).map(p=>({lat:p.y,lng:p.x})));
+    const all = [...allPts, ...markers];
+    if (all.length > 1 && mapRef.current) {
+      try {
+        const bounds = new T.LatLngBounds();
+        all.forEach(p => bounds.extend(new T.LatLng(p.lat, p.lng)));
+        mapRef.current.fitBounds(bounds);
+      } catch(e) {}
+    }
+  }, [routes, markers]);
+
+  return <div ref={ref} style={{ width:"100%", height }} />;
 }
 
 
@@ -277,6 +324,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [err, setErr]         = useState(false);
 
+  const tmap = useTmap();
   const { results, search, clear } = usePlaces();
 
   useEffect(() => {
@@ -335,7 +383,15 @@ export default function App() {
 
           {/* ── STEP 1 ── */}
           {step===1 && <>
-            <KakaoStaticMap center={loc} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
+            {tmap
+              ? <TMapMap key="map1" center={loc} markers={[{lat:loc.lat,lng:loc.lng}]} height={240}/>
+              : <div className="map-fallback" style={{height:240}}>
+                  <div className="map-grid-h" style={{top:"38%"}}/><div className="map-grid-h" style={{top:"65%"}}/>
+                  <div className="map-grid-v" style={{left:"30%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
+                  <div className="map-dot" style={{top:"50%",left:"50%"}}/>
+                  <div className="map-tag">현재 위치</div>
+                </div>
+            }
             <div className="pad">
               <div className="input-card">
                 <div className="input-row">
@@ -384,7 +440,13 @@ export default function App() {
                   <div style={{fontSize:11,color:"#B0AEA8",fontFamily:"'DM Mono',monospace"}}>MSDV 지수 계산 중</div>
                 </div>
               : <>
-                  <KakaoStaticMap center={dest||loc} routes={mapRoutes} markers={mapMarkers} height={200}/>
+                  {tmap
+                    ? <TMapMap key="map2" center={dest||loc} routes={mapRoutes} markers={mapMarkers} height={200}/>
+                    : <div className="map-fallback" style={{height:200}}>
+                        <div className="map-grid-h" style={{top:"40%"}}/><div className="map-grid-v" style={{left:"28%"}}/><div className="map-grid-v" style={{left:"63%"}}/>
+                        <div className="map-dot" style={{top:"42%",left:"12%"}}/><div className="map-dot-end" style={{top:"42%",left:"88%"}}/>
+                      </div>
+                  }
                   <div className="pad">
                     {err && <div className="err-banner">경로 탐색 실패 — 샘플 데이터로 표시합니다</div>}
                     <div className="slider-card">
@@ -454,7 +516,14 @@ export default function App() {
           {/* ── STEP 4 ── */}
           {step===4 && <>
             <div style={{position:"relative"}}>
-              <KakaoStaticMap center={dest||loc} markers={dest?[{lat:loc.lat,lng:loc.lng},{lat:dest.lat,lng:dest.lng}]:[{lat:loc.lat,lng:loc.lng}]} height={220}/>
+              {tmap
+                ? <TMapMap key="map4" center={dest||loc} markers={dest?[{lat:loc.lat,lng:loc.lng},{lat:dest.lat,lng:dest.lng}]:[{lat:loc.lat,lng:loc.lng}]} height={220}/>
+                : <div className="map-fallback" style={{height:220}}>
+                    <div className="map-grid-h" style={{top:"40%"}}/><div className="map-grid-h" style={{top:"68%"}}/>
+                    <div className="map-grid-v" style={{left:"28%"}}/><div className="map-grid-v" style={{left:"65%"}}/>
+                    <div className="map-dot" style={{top:"40%",left:"10%"}}/><div className="map-dot-end" style={{top:"40%",left:"90%"}}/>
+                  </div>
+              }
               <div className="map-chip" style={{position:"absolute",top:10,right:12}}><div className="pulse-dot"/><span>3분 후 도착</span></div>
             </div>
             <div className="pad">
