@@ -266,18 +266,10 @@ function TMapMap({ center, routes=[], markers=[], height=220 }) {
       objs.current.push(poly);
     });
 
-    markers.forEach((m, i) => {
-      const svg = i===0
-        ? `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><circle cx="6" cy="6" r="6" fill="#0A0A0A"/></svg>`
-        : `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><circle cx="6" cy="6" r="5" fill="#fff" stroke="#0A0A0A" stroke-width="2"/></svg>`;
+    markers.forEach((m) => {
       const marker = new T.Marker({
         position: new T.LatLng(m.lat, m.lng),
         map: mapRef.current,
-        icon: new T.Icon({
-          url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-          size: new T.Size(12, 12),
-          anchor: new T.Point(6, 6),
-        }),
       });
       objs.current.push(marker);
     });
