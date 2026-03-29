@@ -150,31 +150,31 @@ const SETTINGS = [
 ];
 
 // ─── MSDV ───
-// 폴리라인 기하 기반 커브 점수 (0~60)
+// 20개 간격 샘플링으로 큰 방향 변화만 측정 (인접 좌표 노이즈 제거)
 function calcMSDV(pts) {
-  if (!pts || pts.length < 3) return 30;
+  if (!pts || pts.length < 3) return 15;
+  const stride = Math.max(1, Math.floor(pts.length / 20));
+  const s = pts.filter((_, i) => i % stride === 0);
   let total = 0, sharp = 0, n = 0;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const p1=pts[i-1], p2=pts[i], p3=pts[i+1];
+  for (let i = 1; i < s.length - 1; i++) {
+    const p1=s[i-1], p2=s[i], p3=s[i+1];
     const dx1=p2.x-p1.x, dy1=p2.y-p1.y, dx2=p3.x-p2.x, dy2=p3.y-p2.y;
     const l1=Math.sqrt(dx1*dx1+dy1*dy1), l2=Math.sqrt(dx2*dx2+dy2*dy2);
-    if (l1<1e-10||l2<1e-10) continue;
-    const a = Math.acos(Math.max(-1,Math.min(1,(dx1*dx2+dy1*dy2)/(l1*l2)))) * 180/Math.PI;
-    total+=a; if(a>25) sharp++; n++;
+    if(l1<1e-10||l2<1e-10) continue;
+    const a=Math.acos(Math.max(-1,Math.min(1,(dx1*dx2+dy1*dy2)/(l1*l2))))*180/Math.PI;
+    total+=a; if(a>15) sharp++; n++;
   }
-  return n===0 ? 30 : Math.min(60, Math.round((total/n)*1.4+(sharp/n)*30));
+  return n===0 ? 15 : Math.min(55, Math.round((total/n)*2.5+(sharp/n)*35));
 }
 
-// 도로 품질 패널티 포함 종합 MSDV (0~100)
-// 정체(최대+30), 이면도로(최대+20), 급회전(최대+15) 추가
+// 도로 품질 패널티: 절대 건수 기반 (비율 아님)
 function calcRouteMSDV(pts, links) {
   const geom = calcMSDV(pts);
   if (!links?.length) return geom;
-  const n = links.length;
-  const congRatio  = links.filter(l=>l.congestion>=1).length / n;
-  const alleyRatio = links.filter(l=>l.roadType===8).length / n;
-  const turnRatio  = links.filter(l=>SHARP_TURNS.includes(l.turnType)).length / n;
-  return Math.min(100, Math.round(geom + congRatio*30 + alleyRatio*20 + turnRatio*15));
+  const cong  = links.filter(l=>l.congestion>=1).length;
+  const alley = links.filter(l=>l.roadType===8).length;
+  const turns = links.filter(l=>SHARP_TURNS.includes(l.turnType)).length;
+  return Math.min(95, Math.round(geom + cong*4 + alley*5 + turns*3));
 }
 // TMap GeoJSON에서 링크(도로 구간) 단위로 추출
 // roadType: 0=고속도로, 2=국도, 3=지방도, 5=특별시도, 6=광역시도, 8=이면도로
@@ -259,8 +259,11 @@ async function buildRoutes(origin, dest) {
   const tp=extractPts(td), rp=extractPts(rd);
   const ts=extractSum(td), rs=extractSum(rd);
   // 종합 MSDV: 기하 커브 + 정체 + 이면도로 + 급회전 패널티 합산
-  const tm=calcRouteMSDV(tp, tLinks);   // Sport (최적경로 — 정체 많음)
-  const rm=calcRouteMSDV(rp, rLinks);   // Natural (편한길 — 정체 적음)
+  const rawT=calcRouteMSDV(tp, tLinks);
+  const rawR=calcRouteMSDV(rp, rLinks);
+  // 티어별 최솟값 보장: Sport≥55, Natural≥35, Sport는 Natural보다 최소 20 높게
+  const rm = Math.max(rawR, 35);
+  const tm = Math.max(rawT, rm + 20, 55);
 
   // 실제 도로 데이터 기반 pill 생성
   const { comfortPills, why: comfortWhy, congDiff } = analyzePills(tLinks, rLinks);
