@@ -222,17 +222,9 @@ async function buildRoutes(origin, dest) {
 }
 
 // ─── TMap SDK 로더 ───
-const TMAP_KEY = "jd4lOOp2nI2dHWR4Rb2vE20d6C2fy4455wjVRVlu";
 function useTmap() {
-  const [ready, setReady] = useState(!!window.Tmapv3);
-  useEffect(() => {
-    if (window.Tmapv3) { setReady(true); return; }
-    const s = document.createElement("script");
-    s.src = `https://apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=${TMAP_KEY}`;
-    s.onload = () => setReady(true);
-    s.onerror = () => console.error("TMap SDK load failed");
-    document.head.appendChild(s);
-  }, []);
+  // Implementation removed as per instructions
+  const [ready] = useState(!!window.Tmapv3);
   return ready;
 }
 
