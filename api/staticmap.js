@@ -24,10 +24,13 @@ export default async function handler(req, res) {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(req.query || {})) {
     if (k === "appKey") continue;
+
+    const key = k === "centerLon" ? "lon" : k === "centerLat" ? "lat" : k;
+
     if (Array.isArray(v)) {
-      v.forEach((val) => params.append(k, String(val)));
+      v.forEach((val) => params.append(key, String(val)));
     } else if (v != null) {
-      params.append(k, String(v));
+      params.append(key, String(v));
     }
   }
 
