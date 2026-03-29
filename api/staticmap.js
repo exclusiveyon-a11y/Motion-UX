@@ -1,29 +1,62 @@
-import React, { useState, useEffect } from "react";
+// Vercel serverless function — TMap Static Map API proxy
+const TMAP_KEY = process.env.TMAP_APP_KEY;
 
-function App() {
-  const [ready, setReady] = useState(false);
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  useEffect(() => {
-    const existing = document.querySelector('script[data-tmap-sdk="true"]');
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
 
-    if (window.Tmapv3) {
-      setReady(true);
-      return;
+  if (req.method !== "GET") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  if (!TMAP_KEY) {
+    res.status(500).json({ error: "TMAP_APP_KEY is missing" });
+    return;
+  }
+
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(req.query || {})) {
+    if (k === "appKey") continue;
+    if (Array.isArray(v)) v.forEach((val) => params.append(k, String(val)));
+    else if (v != null) params.append(k, String(v));
+  }
+
+  const url = `https://apis.openapi.sk.com/tmap/staticMap?${params.toString()}`;
+
+  try {
+    const r = await fetch(url, {
+      method: "GET",
+      headers: {
+        appKey: TMAP_KEY,
+        Accept: "image/png, image/jpeg, image/*, */*",
+      },
+    });
+
+    if (!r.ok) {
+      const txt = await r.text();
+      return res.status(r.status).json({
+        error: "TMAP request failed",
+        status: r.status,
+        details: txt,
+        requestUrl: url,
+      });
     }
 
-    if (existing) {
-      existing.addEventListener("load", () => setReady(true), { once: true });
-      return;
-    }
-
-    const s = document.createElement("script");
-    s.src = `https://apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=${process.env.NEXT_PUBLIC_TMAP_APP_KEY || ""}`;
-    s.setAttribute("data-tmap-sdk", "true");
-    s.onload = () => setReady(true);
-
-    document.head.appendChild(s);
-  }, []);
-
-  // ...rest of your component code
+    const ct = r.headers.get("content-type") || "image/png";
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader("Content-Type", ct);
+    res.status(200).send(buf);
+  } catch (err) {
+    res.status(500).json({
+      error: "Proxy fetch failed",
+      details: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
-
