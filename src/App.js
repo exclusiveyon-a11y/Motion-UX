@@ -309,7 +309,7 @@ const styles = `
   body {
     font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     font-size: 17px; line-height: 1.5; color: #1A1F2B;
-    background: #F4F7FB;
+    background: #000;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "tnum" 1;
@@ -321,7 +321,7 @@ const styles = `
     max-width: 430px; margin: 0 auto;
     height: 100dvh; overflow: hidden; background: #FFFFFF;
     position: relative;
-    box-shadow: 0 0 0 1px rgba(0,0,0,0.04);
+    /* 노치/Dynamic Island 영역까지 콘텐츠가 가리도록 */
   }
 
   /* 풀스크린 컨테이너 (지도 + 시트가 같이 오는 페이지) */
@@ -329,14 +329,24 @@ const styles = `
     position: absolute; inset: 0;
   }
 
+  /* CTA 바 — 시트 밖, 화면 하단 고정 */
+  .cta-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 12px 20px calc(20px + env(safe-area-inset-bottom));
+    background: #FFFFFF;
+    box-shadow: 0 -1px 0 #F2F2F7;
+    z-index: 6;
+  }
+
   /* 지도 영역 */
   .map-bg { position: absolute; inset: 0; }
   .map-fallback { width: 100%; height: 100%; background: #DDE2E8; display: flex; align-items: center; justify-content: center; color: #8C8C8C; font-size: 14px; }
 
-  /* 네비 (Step 1.5+ 만 사용) */
+  /* 네비 (Step 1.5+ 만 사용) — 노치/상태바 아래 시작 */
   .nav {
     position: absolute; top: 0; left: 0; right: 0;
-    height: 56px; padding: 8px 4px; display: flex; align-items: center; gap: 8px;
+    padding: calc(env(safe-area-inset-top) + 8px) 4px 8px;
+    display: flex; align-items: center; gap: 8px; min-height: 56px;
     background: rgba(255,255,255,0.92);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -371,8 +381,10 @@ const styles = `
   .route-chip .meta { color: #6B7280; }
 
   /* ────────── DRAGGABLE BOTTOM SHEET ────────── */
+  /* sheet 의 bottom = CTA 바 위. 드래그 시 top 만 변함. CTA는 sheet 밖이라 안 따라옴 */
   .sheet {
-    position: absolute; left: 0; right: 0; bottom: 0;
+    position: absolute; left: 0; right: 0;
+    bottom: calc(76px + env(safe-area-inset-bottom));
     background: #FFFFFF;
     border-top-left-radius: 20px; border-top-right-radius: 20px;
     box-shadow: 0 -4px 24px rgba(0,0,0,0.08);
@@ -382,17 +394,11 @@ const styles = `
     user-select: none;
     will-change: top;
   }
-  .sheet-grip { padding: 10px 0 6px; cursor: grab; touch-action: none; }
+  .sheet-grip { padding: 10px 0 6px; cursor: grab; touch-action: none; flex-shrink: 0; }
   .sheet-grip:active { cursor: grabbing; }
   .sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: #D9D9D9; margin: 0 auto; }
-  .sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 0; }
+  .sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-  /* CTA bar 시트 안 고정 영역 */
-  .sheet-cta {
-    padding: 12px 20px 28px;
-    background: #FFFFFF;
-    box-shadow: 0 -1px 0 #F2F2F7;
-  }
   .cta {
     width: 100%; height: 52px; border-radius: 14px; border: none; cursor: pointer;
     background: #1A1F2B; color: #FFFFFF; font-size: 17px; font-weight: 500;
@@ -609,10 +615,10 @@ function Step1({ loc, tmap, query, onQueryChange, results, onPickDest, dest, ref
             ))
         }
 
-        <div className="sheet-cta">
+      </DraggableSheet>
+      <div className="cta-bar">
           <button className="cta" disabled={!dest} onClick={onCTA}>경로 탐색</button>
         </div>
-      </DraggableSheet>
     </div>
   );
 }
@@ -651,10 +657,10 @@ function Step15({ loc, tmap, refreshLoc, locating, onCTA, onBack }) {
           <span>⚠️</span>
           <span>도로 상황·장애물에 따라 실제 픽업 위치가 달라질 수 있어요</span>
         </div>
-        <div className="sheet-cta">
+      </DraggableSheet>
+      <div className="cta-bar">
           <button className="cta" onClick={onCTA}>이 위치로 픽업 확정</button>
         </div>
-      </DraggableSheet>
     </div>
   );
 }
@@ -736,10 +742,10 @@ function Step2({ tmap, loc, dest, routes, tierIdx, setTier, err, loading, onCTA,
           <span className="chev">›</span>
         </div>
 
-        <div className="sheet-cta">
+      </DraggableSheet>
+      <div className="cta-bar">
           <button className="cta" onClick={onCTA}>다음 — {rd.price}</button>
         </div>
-      </DraggableSheet>
     </div>
   );
 }
@@ -830,10 +836,10 @@ function Step25({ tmap, loc, dest, routes, tierMeta, whenIdx, setWhen, onBack, o
           </div>
         </div>
 
-        <div className="sheet-cta" style={{ marginTop: 16 }}>
-          <button className="cta" onClick={onCTA}>이 시간으로 예약 · {sel.price}</button>
-        </div>
       </DraggableSheet>
+      <div className="cta-bar">
+        <button className="cta" onClick={onCTA}>이 시간으로 예약 · {sel.price}</button>
+      </div>
     </div>
   );
 }
@@ -886,10 +892,10 @@ function Step3({ tmap, pickup, dest, route, tierMeta, routes, tierIdx, onCTA, on
           <span className="chev">›</span>
         </div>
 
-        <div className="sheet-cta">
+      </DraggableSheet>
+      <div className="cta-bar">
           <button className="cta" onClick={onCTA}>호출하기 · {route.price}</button>
         </div>
-      </DraggableSheet>
     </div>
   );
 }
@@ -928,10 +934,10 @@ function Step4({ loc, tmap, route, tierMeta, onCancel, onBack }) {
           {route.name} · {route.time} 예상 · {route.price}
         </div>
 
-        <div className="sheet-cta">
+      </DraggableSheet>
+      <div className="cta-bar">
           <button className="cta-ghost" onClick={onCancel}>호출 취소</button>
         </div>
-      </DraggableSheet>
     </div>
   );
 }
